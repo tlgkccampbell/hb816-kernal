@@ -19,6 +19,9 @@ KERNAL_INC = 1
 DP_HW           = $00           ; $00-$0F: the decoder register file, never variables
 DP_KERNAL       = $10           ; $10-$3F: KERNAL persistent pointers/counters
 DP_SCRATCH      = $40           ; $40-$7F: clobbered by any KERNAL call
+PTR0            = DP_SCRATCH + 0        ; long pointer (PUTS, block operations)
+ZTMP            = DP_SCRATCH + 4        ; byte scratch
+ZCELL           = DP_SCRATCH + 6        ; 16-bit cell scratch
 DP_MON          = $80           ; $80-$BF: monitor parse state
 DP_USER         = $C0           ; $C0-$FF: reserved for user programs, never touched
 
@@ -50,6 +53,16 @@ KV_TXHEAD       = KVAR + $02    ; 16-bit: UART0 transmit ring head
 KV_TXTAIL       = KVAR + $04    ; 16-bit: UART0 transmit ring tail
 KV_INHEAD       = KVAR + $06    ; 16-bit: console input ring head
 KV_INTAIL       = KVAR + $08    ; 16-bit: console input ring tail
+KV_CROW         = KVAR + $0A    ; 16-bit: cursor row
+KV_CCOL         = KVAR + $0C    ; 16-bit: cursor column
+KV_CATTR        = KVAR + $0E    ; text attribute for new cells (8-bit)
+KV_CURSAVE      = KVAR + $10    ; 16-bit: cell word saved under the drawn cursor
+KV_CURDRAWN     = KVAR + $12    ; 16-bit: nonzero while the cursor is drawn
+KV_BLINK        = KVAR + $14    ; 16-bit: cursor blink phase, in frames
+KV_SHMODE       = KVAR + $16    ; shadow of the write-only MODE register
+KV_SHDISP       = KVAR + $18    ; shadow of DISPBASE
+KV_SHMAP        = KVAR + $1A    ; shadow of MAPBASE
+KV_SHFONT       = KVAR + $1C    ; shadow of FONTBASE
 
 ; ----------------------------------------------------------------------------
 ; Mailboxes, $000300-$00037F: fixed bytes the firmware reports through so the

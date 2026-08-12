@@ -14,7 +14,11 @@
 .include "hb816.inc"
 .include "kernal.inc"
 
+.import k_input_push
+
 .export init_uart
+.export rts_resume
+.export rx_poll
 .export tx_putc
 .export tx_pump
 .export rx_status
@@ -89,6 +93,91 @@ tx_pump:
         sep #$20
         .a8
         plx
+        rtl
+
+; Polls the console port. The order is the whole flow-control contract: when
+; the IIR reports the FIFO at its trigger level, RTS is dropped FIRST, then
+; the FIFO is drained, and RTS is re-raised only if the input ring can absorb
+; another full burst. Below the trigger, whatever is ready is drained and the
+; ring's headroom decides RTS as usual.
+rx_poll:
+        .a8
+        .i16
+        lda UART0 + U_IIR
+        and #IIR_ID_MASK
+        cmp #IIR_RXRDY
+        beq @behind
+        jsl rx_status
+        and #LSR_DR
+        beq @idle
+        jsl rx_drain
+@idle:
+        jsl rts_resume
+        rtl
+@behind:
+        jsl rts_hold
+        jsl rx_drain
+        jsl rts_resume
+        rtl
+
+; Drops RTS - the console has fallen behind - and counts the hold.
+rts_hold:
+        .a8
+        .i16
+        lda #MCR_DTR
+        sta UART0 + U_MCR
+        rep #$20
+        .a16
+        lda MB_FLOWHOLDS
+        inc a
+        sta MB_FLOWHOLDS
+        sep #$20
+        .a8
+        rtl
+
+; Raises RTS, but only while the input ring has room for a full FIFO burst:
+; the bytes the far end may already have in flight when RTS drops must all
+; still fit.
+rts_resume:
+        .a8
+        .i16
+        rep #$20
+        .a16
+        lda KV_INTAIL
+        sec
+        sbc KV_INHEAD
+        dec a
+        and #INRING_MASK
+        cmp #16
+        sep #$20
+        .a8
+        bcc @held
+        lda #MCR_DTR_RTS
+        sta UART0 + U_MCR
+@held:
+        rtl
+
+; Moves every byte the FIFO holds into the console input ring; the ring's
+; flow control is what keeps it from overflowing, so a byte that finds the
+; ring full anyway is dropped.
+rx_drain:
+        .a8
+        .i16
+@loop:
+        jsl rx_status
+        and #LSR_DR
+        beq @done
+        lda UART0 + U_DATA
+        jsl k_input_push
+        rep #$20
+        .a16
+        lda MB_RXCOUNT
+        inc a
+        sta MB_RXCOUNT
+        sep #$20
+        .a8
+        bra @loop
+@done:
         rtl
 
 ; UART0's line status -> A. This is the only routine that reads the LSR,

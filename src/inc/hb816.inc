@@ -105,4 +105,7 @@ TEXT_SCROLL_SIZE = (TEXT_ROWS - 1) * TEXT_ROW_STRIDE    ; $1D00
 
 FONT_SIZE       = $1000         ; 256 glyphs x 16 rows
 
+MAP_PAGE        = 0             ; text matrix at VRAM + 0 (MAPBASE steps 8 KiB)
+FONT_PAGE       = 2             ; font at VRAM + $2000 (FONTBASE steps 4 KiB)
+
 .endif

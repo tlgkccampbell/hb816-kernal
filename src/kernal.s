@@ -9,23 +9,34 @@
 .include "hb816.inc"
 .include "kernal.inc"
 
+.import con_chrin
+.import con_chrin_wait
+.import con_chrout
+.import con_rdline
+.import cursor_draw
+.import cursor_undraw
 .import init_uart
 .import int_default
+.import monitor_entry
 .import nmi_exit
+.import rts_resume
+.import rx_poll
 .import tx_pump
-.import tx_putc
+.import video_init
 
+.export banner
 .export k_cold
 .export k_idle
-.export k_no_input
 .export k_unimpl
+.export k_warm
 
 .segment "FARCODE"
 
 ; Cold start, entered from the reset stub in native mode with A 8-bit, X/Y
-; 16-bit, S at STACK_TOP, D and DBR zero. Order matters twice over: the RAM
-; vectors must be installed before any interrupt path is unmasked, and
-; unmasking NMI is the last thing done.
+; 16-bit, S at STACK_TOP, D and DBR zero. Order matters three times over: the
+; RAM vectors are installed before any interrupt path is unmasked, the
+; console's RTS stays low until the whole console can poll, and unmasking NMI
+; is the last thing done before the monitor takes over.
 k_cold:
         .a8
         .i16
@@ -66,42 +77,79 @@ k_cold:
         lda #$02
         sta MB_STEP
 
-        ; The banner goes out on the console port.
-        ldx #$0000
-@banner:
-        lda f:banner,x
-        beq @banner_done
-        jsl tx_putc
-        inx
-        bra @banner
-@banner_done:
+        ; The display, in its mandatory order.
+        jsl video_init
         lda #$03
         sta MB_STEP
 
-        ; Ready: report it, then unmask the vblank NMI - the one interrupt
-        ; this firmware takes - as the very last act of initialization.
+        ; The console is whole - transmit ring, input ring, glass TTY - so
+        ; the far end may talk now.
+        jsl rts_resume
         lda #$04
         sta MB_STEP
+
+        ; Ready: report it, then unmask the vblank NMI - the one interrupt
+        ; this firmware takes - and hand the machine to the monitor.
         lda #BOOT_READY
         sta MB_BOOTFLAG
         lda #(ICR_INTEN | ICR_NMIEN)
         icr_store
+        jml monitor_entry
 
-@loop:
-        jsl K_IDLE
-        bra @loop
+; Warm start: a fresh stack, direct page and data bank, the write-only video
+; registers replayed from their shadows, and the monitor re-entered. The
+; rings and the screen survive.
+k_warm:
+        rep #$30
+        .a16
+        .i16
+        ldx #STACK_TOP
+        txs
+        lda #$0000
+        tcd
+        sep #$20
+        .a8
+        lda #$00
+        pha
+        plb
+        jsl K_VPU_SYNC
+        jml monitor_entry
 
-; One background iteration: pump the transmitter. The receive poll and the
-; cursor blink join this loop with the console phase.
+; One background iteration: pump the transmitter, poll the receiver, and
+; blink the cursor off the vblank tick.
 k_idle:
         .a8
         .i16
         jsl tx_pump
-        rtl
-
-; Default CHRIN target while no input driver exists: no character, ever.
-k_no_input:
-        clc
+        jsl rx_poll
+        rep #$20
+        .a16
+        lda KV_TICK
+        beq @done
+        stz KV_TICK
+        lda KV_BLINK
+        inc a
+        cmp #30
+        bcc @keep
+        sep #$20
+        .a8
+        lda KV_CURDRAWN
+        beq @draw
+        jsl cursor_undraw
+        bra @mark
+@draw:
+        jsl cursor_draw
+@mark:
+        rep #$20
+        .a16
+        lda KV_CURDRAWN
+        sta MB_CURSOR
+        lda #$0000
+@keep:
+        sta KV_BLINK
+@done:
+        sep #$20
+        .a8
         rtl
 
 ; Target of every jump-table slot that has no implementation yet: report
@@ -121,13 +169,13 @@ banner:
 ; ROM defaults for the RAM indirection vectors, in V_CHRIN..V_COP order:
 ; four bytes each, a 24-bit target and a pad.
 vec_defaults:
-        .faraddr k_no_input     ; V_CHRIN
+        .faraddr con_chrin      ; V_CHRIN
         .byte $00
-        .faraddr k_unimpl       ; V_CHROUT
+        .faraddr con_chrout     ; V_CHROUT
         .byte $00
-        .faraddr k_unimpl       ; V_CHRIN_WAIT
+        .faraddr con_chrin_wait ; V_CHRIN_WAIT
         .byte $00
-        .faraddr k_unimpl       ; V_RDLINE
+        .faraddr con_rdline     ; V_RDLINE
         .byte $00
         .faraddr nmi_exit       ; V_NMI_HOOK
         .byte $00

@@ -12,7 +12,14 @@
 
 .import k_cold
 .import k_idle
+.import k_input_push
+.import k_plot
+.import k_puts
+.import k_setattr
 .import k_unimpl
+.import k_vpu_sync
+.import k_warm
+.import tty_cls
 
 .export int_default
 .export nmi_exit
@@ -26,18 +33,18 @@
 .segment "JUMPTABLE"
 
         jml reset               ; $C000 KCOLD
-        jml k_unimpl            ; $C004 KWARM
-        jml k_unimpl            ; $C008 CHRIN
-        jml k_unimpl            ; $C00C CHROUT
-        jml k_unimpl            ; $C010 CHRIN_WAIT
-        jml k_unimpl            ; $C014 RDLINE
-        jml k_unimpl            ; $C018 PUTS
+        jml k_warm              ; $C004 KWARM
+        jml chrin_entry         ; $C008 CHRIN
+        jml chrout_entry        ; $C00C CHROUT
+        jml chrin_wait_entry    ; $C010 CHRIN_WAIT
+        jml rdline_entry        ; $C014 RDLINE
+        jml k_puts              ; $C018 PUTS
         jml k_idle              ; $C01C IDLE
-        jml k_unimpl            ; $C020 CLS
-        jml k_unimpl            ; $C024 PLOT
-        jml k_unimpl            ; $C028 SETATTR
-        jml k_unimpl            ; $C02C INPUT_PUSH
-        jml k_unimpl            ; $C030 VPU_SYNC
+        jml tty_cls             ; $C020 CLS
+        jml k_plot              ; $C024 PLOT
+        jml k_setattr           ; $C028 SETATTR
+        jml k_input_push        ; $C02C INPUT_PUSH
+        jml k_vpu_sync          ; $C030 VPU_SYNC
         jml nmi_exit            ; $C034 NMI_EXIT
         jml k_unimpl            ; $C038 reserved
         jml k_unimpl            ; $C03C reserved
@@ -140,6 +147,20 @@ int_default:
 
 unused_handler:
         rti
+
+; The console calls dispatch through their RAM vectors, so a driver can be
+; hooked in front of - or in place of - the ROM's own.
+chrin_entry:
+        jml [V_CHRIN]
+
+chrout_entry:
+        jml [V_CHROUT]
+
+chrin_wait_entry:
+        jml [V_CHRIN_WAIT]
+
+rdline_entry:
+        jml [V_RDLINE]
 
 .segment "LOWRODATA"
 
