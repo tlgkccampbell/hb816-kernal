@@ -67,6 +67,13 @@ k_cold:
 
         sep #$20
         .a8
+
+        ; The register frame starts in the ABI state, so G enters a program
+        ; with an eight-bit accumulator and sixteen-bit indexes even before
+        ; anything is run or set through R.
+        lda #$24                ; M and I set
+        sta RF_P
+
         lda #$01
         sta MB_STEP
 

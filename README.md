@@ -120,6 +120,21 @@ with one operand dumps 128 bytes; a bare `M` continues from the last walk.
 The loader accepts S0 (ignored), S1/S2/S3 data, S5 (ignored), and S7/S8/S9
 terminators, whose address becomes `G`'s default target.
 
+## Examples
+
+`examples/` holds programs linked to run from work RAM and loaded through the
+monitor. `pwsh examples/build.ps1` assembles each `.s` file with the shared
+`example.cfg` (flat binary at `$010000`) and wraps it into
+`out/examples/<name>.srec` — S2 data records plus an S8 terminator that names
+the entry point, so `G` needs no operand. At the monitor: type `L`, paste the
+`.srec` file (Ctrl+Shift+V in the Godot host), then `G`.
+
+`colors.s` paints the sixteen RGBI text colours — each row an index, the
+colour's name in its own colour, and a swatch of full blocks, with a
+background bar underneath — entirely through the KERNAL jump table, and is
+the model for what a program the monitor loads looks like: entered by `G` in
+the ABI register state, KERNAL calls for all I/O, `rtl` to come home.
+
 ## Repository layout
 
 | Path | Contents |
