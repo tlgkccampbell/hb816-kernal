@@ -89,6 +89,8 @@ VPU_MODE        = VPUREG + $0   ; mode, display base and blink, in one byte
 VPU_CURX        = VPUREG + $1   ; hardware cursor column, 0-79
 VPU_CURY        = VPUREG + $2   ; hardware cursor row; CURY_PARK hides it
 VPU_FONTBASE    = VPUREG + $5   ; glyph table base, 4 KiB granularity
+VPU_YCMP        = VPUREG + $6   ; raster compare: scan line 4*YCMP, /IRQ for
+                                ;   its duration; YCMP_PARK never matches
 
 ; One MODE byte is a whole display description - family, options, blank, and
 ; the display base - and every write of it carries all of them. There is no
@@ -103,8 +105,11 @@ MODE_BLINK      = $80           ; per-cell character blink, text modes only
 
 ; The card powers up as if MODE $01 had been written - text, every base zero -
 ; and its hardware cursor powers up visible at cell (0,0). CURY_PARK names a
-; row neither glyph height displays, which is how the cursor is put away.
+; row neither glyph height displays, which is how the cursor is put away. Its
+; raster compare powers up at 0, naming line 0 of every frame; YCMP_PARK names
+; a line past the end of the frame, which is how the compare is put away.
 CURY_PARK       = $3F
+YCMP_PARK       = $FF
 
 VRAM            = $A00000       ; flat one-megabyte video memory window
 CLUT            = VRAM + $FFE00 ; palette window: entry n is the even byte at 2n
