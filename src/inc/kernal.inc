@@ -102,6 +102,26 @@ LINEBUF         = $000900       ; RDLINE buffer, NUL-terminated
 LINEBUF_MAX     = 255
 MONSTATE        = $000A00       ; monitor state, including the user register frame
 
+; The saved user register frame: what R displays and edits, what G and J load
+; before calling user code, and what a return - rtl or BRK - captures.
+RF_C            = MONSTATE + $00        ; 16-bit accumulator
+RF_X            = MONSTATE + $02        ; 16-bit
+RF_Y            = MONSTATE + $04        ; 16-bit
+RF_S            = MONSTATE + $06        ; 16-bit, captured only
+RF_D            = MONSTATE + $08        ; 16-bit
+RF_DBR          = MONSTATE + $0A        ; 8-bit
+RF_P            = MONSTATE + $0B        ; 8-bit
+RF_PBR          = MONSTATE + $0C        ; 8-bit
+RF_PC           = MONSTATE + $0E        ; 16-bit
+RF_ENTRY        = MONSTATE + $10        ; 24-bit S-record entry address, plus a pad
+
+; MB_LASTERR codes.
+ERR_NONE        = 0
+ERR_COMMAND     = 1             ; unknown command letter
+ERR_OPERAND     = 2             ; missing or malformed operand
+ERR_SREC_FORMAT = 3             ; S-record with a bad shape
+ERR_SREC_SUM    = 4             ; S-record whose checksum failed
+
 USER_BASE       = $001000       ; start of bank-0 user space
 
 ; ----------------------------------------------------------------------------

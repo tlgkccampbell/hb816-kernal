@@ -21,6 +21,7 @@
 .import k_warm
 .import tty_cls
 
+.export hexdigits
 .export int_default
 .export nmi_exit
 
