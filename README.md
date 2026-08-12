@@ -114,6 +114,12 @@ whitespace-separated hex operands; addresses are up to six hex digits (24-bit).
 displayed. Load big programs at `$010000`+ (S2 records), small ones at
 `$001000`+.
 
+A parse error prints `?` and the offending column; a failed S-record prints
+`?S` and an error code, then swallows the stream until it goes quiet. `M`
+with one operand dumps 128 bytes; a bare `M` continues from the last walk.
+The loader accepts S0 (ignored), S1/S2/S3 data, S5 (ignored), and S7/S8/S9
+terminators, whose address becomes `G`'s default target.
+
 ## Repository layout
 
 | Path | Contents |
