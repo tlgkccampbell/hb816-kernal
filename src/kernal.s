@@ -9,6 +9,7 @@
 .include "hb816.inc"
 .include "kernal.inc"
 
+.import brk_default
 .import con_chrin
 .import con_chrin_wait
 .import con_chrout
@@ -181,8 +182,8 @@ vec_defaults:
         .byte $00
         .faraddr int_default    ; V_IRQ
         .byte $00
-        .faraddr int_default    ; V_BRK
+        .faraddr brk_default    ; V_BRK
         .byte $00
-        .faraddr int_default    ; V_COP
+        .faraddr brk_default    ; V_COP
         .byte $00
 vec_defaults_end:

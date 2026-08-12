@@ -17,10 +17,13 @@
 .include "kernal.inc"
 
 .import banner
+.import cmd_load
 .import hexdigits
 
-.export mon_parse_hex
+.export brk_default
 .export mon_error
+.export mon_parse_hex
+.export mon_upper
 .export monitor_entry
 .export print_crlf
 .export print_hex_byte
@@ -69,63 +72,82 @@ mon_loop:
         jsr mon_next
         beq mon_loop            ; an empty line just reprompts
         jsr mon_upper
-        cmp #'M'
-        beq @m
-        cmp #'E'
-        beq @e
-        cmp #'F'
-        beq @f
-        cmp #'T'
-        beq @t
-        cmp #'C'
-        beq @c
-        cmp #'R'
-        beq @r
-        cmp #'H'
-        beq @h
-        cmp #'X'
-        beq @x
-        cmp #'D'
-        beq @d
+        ldx #$0000
+@find:
+        cmp f:cmd_letters,x
+        beq @found
+        inx
+        cpx #CMD_COUNT
+        bne @find
         lda #ERR_COMMAND
         jsr mon_error
         jmp mon_loop
-@m:
+@found:
+        rep #$20
+        .a16
+        txa
+        asl a
+        tax
+        sep #$20
+        .a8
+        jmp (.loword(cmd_dispatch),x)
+
+; The dispatch targets: count the command, run it, come back for a prompt.
+do_dump:
         jsr mon_counted
         jsr cmd_dump
         jmp mon_loop
-@e:
+
+do_deposit:
         jsr mon_counted
         jsr cmd_deposit
         jmp mon_loop
-@f:
+
+do_fill:
         jsr mon_counted
         jsr cmd_fill
         jmp mon_loop
-@t:
+
+do_transfer:
         jsr mon_counted
         jsr cmd_transfer
         jmp mon_loop
-@c:
+
+do_compare:
         jsr mon_counted
         jsr cmd_compare
         jmp mon_loop
-@r:
+
+do_registers:
         jsr mon_counted
         jsr cmd_registers
         jmp mon_loop
-@h:
+
+do_help:
         jsr mon_counted
         lda #^help_text
         ldx #.loword(help_text)
         jsl K_PUTS
         jmp mon_loop
-@x:
+
+do_warm:
+        jsr mon_counted
         jsl K_WARM
-@d:
+
+do_reserved:
         lda #^reserved_text
         ldx #.loword(reserved_text)
         jsl K_PUTS
+        jmp mon_loop
+
+do_load:
+        jsr mon_counted
+        jsr cmd_load
+        jmp mon_loop
+
+do_go:
+        jsr mon_counted
+        jsr cmd_go
         jmp mon_loop
 
 ; Counts a dispatched command.
@@ -680,48 +702,7 @@ cmd_registers:
         jsr mon_skip_spaces
         jsr mon_peek
         bne @set
-        ; PC=BB:HHHH A=HHHH X=HHHH Y=HHHH S=HHHH D=HHHH B=HH P=HH
-        lda #'P'
-        jsl K_CHROUT
-        lda #'C'
-        jsl K_CHROUT
-        lda #'='
-        jsl K_CHROUT
-        lda RF_PBR
-        jsr print_hex_byte
-        lda #':'
-        jsl K_CHROUT
-        ldx RF_PC
-        jsr print_hex_x
-        lda #'A'
-        jsr print_reg_word_prefix
-        ldx RF_C
-        jsr print_hex_x
-        lda #'X'
-        jsr print_reg_word_prefix
-        ldx RF_X
-        jsr print_hex_x
-        lda #'Y'
-        jsr print_reg_word_prefix
-        ldx RF_Y
-        jsr print_hex_x
-        lda #'S'
-        jsr print_reg_word_prefix
-        ldx RF_S
-        jsr print_hex_x
-        lda #'D'
-        jsr print_reg_word_prefix
-        ldx RF_D
-        jsr print_hex_x
-        lda #'B'
-        jsr print_reg_word_prefix
-        lda RF_DBR
-        jsr print_hex_byte
-        lda #'P'
-        jsr print_reg_word_prefix
-        lda RF_P
-        jsr print_hex_byte
-        jsr print_crlf
+        jsr print_frame
         rts
 @set:
         jsr mon_next
@@ -836,6 +817,225 @@ print_reg_word_prefix:
         lda #'='
         jsl K_CHROUT
         rts
+
+; PC=BB:HHHH A=HHHH X=HHHH Y=HHHH S=HHHH D=HHHH B=HH P=HH
+print_frame:
+        .a8
+        .i16
+        lda #'P'
+        jsl K_CHROUT
+        lda #'C'
+        jsl K_CHROUT
+        lda #'='
+        jsl K_CHROUT
+        lda RF_PBR
+        jsr print_hex_byte
+        lda #':'
+        jsl K_CHROUT
+        ldx RF_PC
+        jsr print_hex_x
+        lda #'A'
+        jsr print_reg_word_prefix
+        ldx RF_C
+        jsr print_hex_x
+        lda #'X'
+        jsr print_reg_word_prefix
+        ldx RF_X
+        jsr print_hex_x
+        lda #'Y'
+        jsr print_reg_word_prefix
+        ldx RF_Y
+        jsr print_hex_x
+        lda #'S'
+        jsr print_reg_word_prefix
+        ldx RF_S
+        jsr print_hex_x
+        lda #'D'
+        jsr print_reg_word_prefix
+        ldx RF_D
+        jsr print_hex_x
+        lda #'B'
+        jsr print_reg_word_prefix
+        lda RF_DBR
+        jsr print_hex_byte
+        lda #'P'
+        jsr print_reg_word_prefix
+        lda RF_P
+        jsr print_hex_byte
+        jsr print_crlf
+        rts
+
+; G addr / J addr - call user code through the saved register frame; with no
+; operand the target is the last S-record entry point. The call is a faked
+; jsl, so user code ending in rtl lands back in the monitor, which recaptures
+; the frame, replays the video registers, and displays what came back.
+cmd_go:
+        .a8
+        .i16
+        jsr mon_parse_hex
+        bcc @entry
+        rep #$20
+        .a16
+        lda z:MVAL
+        sta RF_PC
+        sep #$20
+        .a8
+        lda z:MVAL+2
+        sta RF_PBR
+        bra @call
+@entry:
+        rep #$20
+        .a16
+        lda RF_ENTRY
+        sta RF_PC
+        sep #$20
+        .a8
+        lda RF_ENTRY+2
+        sta RF_PBR
+@call:
+        ; The target pointer, somewhere jml [abs] can fetch it: the indirect
+        ; fetch reads bank zero absolutely, so it holds still while D and DBR
+        ; become the user's.
+        rep #$20
+        .a16
+        lda RF_PC
+        sta z:MDST
+        lda #$0001
+        sta MB_GACTIVE
+        sep #$20
+        .a8
+        lda RF_PBR
+        sta z:MDST+2
+        ; The faked jsl frame: rtl adds one to the address it pulls.
+        lda #^g_return
+        pha
+        rep #$20
+        .a16
+        lda #.loword(g_return) - 1
+        pha
+        ; The user frame. Everything after tcd reaches the frame absolutely;
+        ; the interrupt mask stays set - a program that wants IRQs hooks V_IRQ
+        ; and clears it itself.
+        lda RF_D
+        tcd
+        ldx a:RF_X
+        ldy a:RF_Y
+        sep #$20
+        .a8
+        lda a:RF_P
+        ora #$04
+        pha
+        lda a:RF_DBR
+        pha
+        rep #$20
+        .a16
+        lda a:RF_C
+        plb
+        plp
+        jml [MDST]
+
+; Where rtl lands: the user's registers are captured exactly as they came
+; back, and the monitor's own world - stack frame aside - is rebuilt.
+g_return:
+        php
+        rep #$30
+        .a16
+        .i16
+        sta f:RF_C
+        txa                     ; stx and sty have no long mode; A is captured
+        sta f:RF_X
+        tya
+        sta f:RF_Y
+        tdc
+        sta f:RF_D
+        tsc
+        inc a
+        sta f:RF_S
+        phb
+        sep #$20
+        .a8
+        pla
+        sta f:RF_DBR
+        pla
+        sta f:RF_P
+        rep #$30
+        .a16
+        .i16
+        lda #$0000
+        tcd
+        sta f:MB_GACTIVE
+        sep #$20
+        .a8
+        lda #$00
+        pha
+        plb
+        jsl K_VPU_SYNC
+        jsr print_frame
+        rts
+
+; The BRK and COP vectors land here through their RAM vectors: the interrupt
+; frame and live registers are captured, the stack, direct page and data bank
+; are made the monitor's again, and the loop is re-entered - there is no
+; resuming past a BRK, but R and G together restart wherever the user says.
+brk_default:
+        rep #$30
+        .a16
+        .i16
+        sta f:RF_C
+        txa                     ; stx and sty have no long mode; A is captured
+        sta f:RF_X
+        tya
+        sta f:RF_Y
+        tdc
+        sta f:RF_D
+        sep #$20
+        .a8
+        pla
+        sta f:RF_P
+        rep #$20
+        .a16
+        pla
+        sec
+        sbc #2                  ; the pushed address is past BRK's signature
+        sta f:RF_PC
+        sep #$20
+        .a8
+        pla
+        sta f:RF_PBR
+        phb
+        pla
+        sta f:RF_DBR
+        rep #$20
+        .a16
+        tsc
+        sta f:RF_S
+        lda f:MB_BRKCOUNT
+        inc a
+        sta f:MB_BRKCOUNT
+        lda #$0000
+        sta f:MB_GACTIVE
+        ldx #STACK_TOP
+        txs
+        lda #$0000
+        tcd
+        sep #$20
+        .a8
+        lda #$00
+        pha
+        plb
+        jsl K_VPU_SYNC
+        lda #^brk_text
+        ldx #.loword(brk_text)
+        jsl K_PUTS
+        lda RF_PBR
+        jsr print_hex_byte
+        lda #':'
+        jsl K_CHROUT
+        ldx RF_PC
+        jsr print_hex_x
+        jsr print_crlf
+        jsr print_frame
+        jmp mon_loop
 
 ; ----------------------------------------------------------------------------
 ; Parsing.
@@ -1099,6 +1299,30 @@ mon_prompt:
 
 reserved_text:
         .byte "? (reserved)", $0D, $0A, 0
+
+brk_text:
+        .byte "BRK at ", 0
+
+; The command letters and their dispatch targets, in step. jmp (abs,x) reads
+; the pointer from the program bank, which is where both tables live.
+cmd_letters:
+        .byte "MEFTCRHXDLGJ"
+
+CMD_COUNT = 12
+
+cmd_dispatch:
+        .word .loword(do_dump)
+        .word .loword(do_deposit)
+        .word .loword(do_fill)
+        .word .loword(do_transfer)
+        .word .loword(do_compare)
+        .word .loword(do_registers)
+        .word .loword(do_help)
+        .word .loword(do_warm)
+        .word .loword(do_reserved)
+        .word .loword(do_load)
+        .word .loword(do_go)
+        .word .loword(do_go)
 
 help_text:
         .byte "M [A [B]]   dump memory", $0D, $0A
