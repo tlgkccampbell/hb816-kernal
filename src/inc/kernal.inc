@@ -59,9 +59,11 @@ KV_CATTR        = KVAR + $0E    ; text attribute for new cells (8-bit)
 KV_CURSAVE      = KVAR + $10    ; 16-bit: cell word saved under the drawn cursor
 KV_CURDRAWN     = KVAR + $12    ; 16-bit: nonzero while the cursor is drawn
 KV_BLINK        = KVAR + $14    ; 16-bit: cursor blink phase, in frames
-KV_SHMODE       = KVAR + $16    ; shadow of the write-only MODE register
-KV_SHDISP       = KVAR + $18    ; shadow of DISPBASE
-KV_SHMAP        = KVAR + $1A    ; shadow of MAPBASE
+KV_SHMODE       = KVAR + $16    ; shadow of the write-only MODE register, whose
+                                ;   byte carries the display base and blink too
+                                ; KVAR + $18 and KVAR + $1A are free: they were
+                                ;   the DISPBASE and MAPBASE shadows, registers
+                                ;   the card no longer has
 KV_SHFONT       = KVAR + $1C    ; shadow of FONTBASE
 
 ; ----------------------------------------------------------------------------

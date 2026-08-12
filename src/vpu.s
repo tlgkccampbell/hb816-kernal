@@ -5,8 +5,9 @@
 ; after anything that might have scribbled on the register window. Video
 ; memory is addressed as base + row * $100 + col * 2 - a text row is a page -
 ; and all of it is reached with long addressing, because the data bank stays
-; zero. There is no hardware cursor: the software cursor saves the cell under
-; it and rewrites the attribute with its nibbles swapped.
+; zero. The card's own cursor is parked at init and stays parked: the software
+; cursor saves the cell under it and rewrites the attribute with its nibbles
+; swapped.
 
 .p816
 
@@ -269,14 +270,21 @@ tty_cls:
 ; Brings the display up in the one order that never shows garbage: blank
 ; forced first, the palette's entry zero before anything else - the blanking
 ; level itself routes through the palette - then the rest of the identity
-; palette, the font, the base registers, a cleared matrix, and only then the
-; unblanked text mode.
+; palette, the font, the font base, a parked cursor, a cleared matrix, and
+; only then the unblanked text mode.
 video_init:
         .a8
         .i16
         phx
         phy
-        lda #(MODE_TEXT | MODE_BLANK)
+
+        ; The mode shadow starts where the card starts. Cold start zeroed it,
+        ; and a zero shadow describes bitmap 1 bpp, not the text mode the card
+        ; actually comes up in - so any byte composed from it would be wrong.
+        lda #MODE_TEXT
+        sta KV_SHMODE
+
+        lda #(MODE_TEXT | MODE_BLANK | (MAP_SLOT << MODE_BASE_SHIFT))
         jsl vpu_set_mode
         lda #$00
         sta f:CLUT
@@ -301,14 +309,16 @@ video_init:
         .a8
         lda #$0F
         sta KV_CATTR
-        lda #$00
-        jsl vpu_set_dispbase
-        lda #MAP_PAGE
-        jsl vpu_set_mapbase
         lda #FONT_PAGE
         jsl vpu_set_fontbase
+
+        ; The card's cursor comes up visible at cell (0,0), where it would
+        ; blink under the software cursor. Park it.
+        lda #CURY_PARK
+        sta VPU_CURY
+
         jsl tty_cls
-        lda #MODE_TEXT
+        lda #(MODE_TEXT | (MAP_SLOT << MODE_BASE_SHIFT))
         jsl vpu_set_mode
         rep #$20
         .a16
@@ -355,41 +365,28 @@ k_setattr:
 
 ; Replays every write-only register from its shadow. Warm start and the
 ; monitor's return path call this, because user code may have written the
-; register window.
+; register window. The cursor row has no shadow: the KERNAL wants the card's
+; cursor parked at all times, so the park value is simply written again.
 k_vpu_sync:
         .a8
         .i16
         lda KV_SHMODE
         sta VPU_MODE
-        lda KV_SHDISP
-        sta VPU_DISPBASE
-        lda KV_SHMAP
-        sta VPU_MAPBASE
         lda KV_SHFONT
         sta VPU_FONTBASE
+        lda #CURY_PARK
+        sta VPU_CURY
         rtl
 
 ; The register helpers: shadow first, then the register, with plain single
-; stores - the card's write strobe tolerates nothing read-modify-write.
+; stores - the card's write strobe tolerates nothing read-modify-write. The
+; mode helper is the only way the display base moves, because the base has no
+; register of its own: a caller composes the whole byte it wants.
 vpu_set_mode:
         .a8
         .i16
         sta KV_SHMODE
         sta VPU_MODE
-        rtl
-
-vpu_set_dispbase:
-        .a8
-        .i16
-        sta KV_SHDISP
-        sta VPU_DISPBASE
-        rtl
-
-vpu_set_mapbase:
-        .a8
-        .i16
-        sta KV_SHMAP
-        sta VPU_MAPBASE
         rtl
 
 vpu_set_fontbase:
