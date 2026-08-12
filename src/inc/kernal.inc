@@ -45,6 +45,12 @@ V_COP           = $00022C
 
 KVAR            = $000240       ; KERNAL variable block, through $0002FF
 
+KV_TICK         = KVAR + $00    ; 16-bit: set by the vblank NMI, consumed by IDLE
+KV_TXHEAD       = KVAR + $02    ; 16-bit: UART0 transmit ring head
+KV_TXTAIL       = KVAR + $04    ; 16-bit: UART0 transmit ring tail
+KV_INHEAD       = KVAR + $06    ; 16-bit: console input ring head
+KV_INTAIL       = KVAR + $08    ; 16-bit: console input ring tail
+
 ; ----------------------------------------------------------------------------
 ; Mailboxes, $000300-$00037F: fixed bytes the firmware reports through so the
 ; emulator's tests can watch progress without depending on cycle counts.
