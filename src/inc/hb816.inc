@@ -72,6 +72,13 @@ V_ORANH         = 15            ; port A without the handshake: reads the same
                                 ;   byte and leaves the flags alone
 
 ACR_PALATCH     = $01           ; latch port A on CA1's active edge
+
+; PCR bit 0 chooses CA1's active edge - clear for the falling one - and bits
+; 3:1 choose what CA2 does. 100 is handshake output: CA2 goes low when ORA is
+; read at the handshaking address and returns high on CA1's next active edge,
+; which is the acknowledge the keyboard board waits on.
+PCR_CA1_FALLING = $00
+PCR_CA2_HANDSHAKE = $08
 PCR_CA1POS      = $01           ; CA1 active on the rising edge; clear is falling
 IFR_CA1         = $02           ; CA1 transition seen
 IER_SET         = $80           ; in a write to IER, set the named bits
