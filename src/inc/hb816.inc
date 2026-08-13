@@ -91,6 +91,15 @@ IER_CA1         = $02           ; CA1 interrupt enable
 KBD_PRESS       = $80           ; key press; the next byte is the usage ID
 KBD_RELEASE     = $81           ; key release; likewise
 
+; The usage IDs of the keys the keyboard's typematic never repeats: the three
+; locks, whose repeats would toggle them over and over, and the eight modifiers
+; at $E0-$E7, which are held rather than typed.
+KBD_CAPSLOCK    = $39
+KBD_SCROLLLOCK  = $47
+KBD_NUMLOCK     = $53
+KBD_LCTRL       = $E0
+KBD_RGUI        = $E7
+
 UART0           = $008010       ; the console port
 UART1           = $008020       ; the auxiliary port
 UART_STRIDE     = UART1 - UART0

@@ -67,6 +67,24 @@ KV_SHMODE       = KVAR + $16    ; shadow of the write-only MODE register, whose
 KV_SHFONT       = KVAR + $1C    ; shadow of FONTBASE
 KV_KBDLEAD      = KVAR + $1E    ; 16-bit: the key-event lead byte whose usage ID
                                 ;   has not arrived yet, or zero between events
+KV_KBDHELD      = KVAR + $20    ; 16-bit: the usage ID the keyboard's typematic
+                                ;   is repeating, or zero while none is
+KV_KBDSEEN      = KVAR + $22    ; 16-bit: MB_JIFFY's low half when that key was
+                                ;   last announced, which its repeats refresh
+
+; Frames a repeating key may go unannounced before its bit is cleared.
+;
+; The gap this has to clear is the typematic *delay* and not its period: a key
+; is announced once when it goes down and then not again for half a second, so
+; a timeout shorter than that would clear a key still being held and let its
+; first repeat set it again - a phantom release, a quarter of a second long,
+; every time a key is pressed. Half a second is thirty frames, and forty leaves
+; margin over it while still clearing a stuck key inside a second.
+;
+; This is therefore coupled to the keyboard's own delay, the way the byte
+; stream above is coupled to protocol.h: the emulator's Ps2KeyboardDevice names
+; the same half second, and the two move together.
+KBD_HOLD_TIMEOUT = 40
 
 ; ----------------------------------------------------------------------------
 ; Mailboxes, $000300-$00037F: fixed bytes the firmware reports through so the
@@ -115,8 +133,10 @@ BOOT_READY      = $A5
 ;
 ; The bitmap follows the keyboard's press and release events, which are
 ; reported for every key including those that also produce characters. A
-; release that never arrives leaves its bit set; see README.md for what that
-; costs and what would fix it.
+; release that never arrives would leave its bit set forever, so the key the
+; keyboard's typematic is repeating is timed out: its repeats are what date it,
+; and their silence is what says the release was lost. Only that one key can be
+; timed out - see kbd.s for why, and README.md for what still sticks.
 ; ----------------------------------------------------------------------------
 
 KBDSTATE        = $0002E0       ; 32 bytes, filling KVAR through $0002FF
