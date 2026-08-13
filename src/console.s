@@ -13,7 +13,6 @@
 .include "kernal.inc"
 
 .import rts_resume
-.import rx_poll
 .import tty_putc
 .import tx_pump
 .import tx_putc
@@ -28,15 +27,15 @@
 .segment "FARCODE"
 
 ; Non-blocking read: C=1 with the character in A, C=0 with none. Pumps the
-; transmitter and polls the receiver first, so a caller spinning on CHRIN
-; alone still makes the machine go; consuming a byte frees ring room, so RTS
-; gets a chance to come back up.
+; transmitter first, so a caller spinning on CHRIN alone still makes the
+; machine go; consuming a byte frees ring room, so RTS gets a chance to come
+; back up. Both input sources fill the ring from the interrupt handler, which
+; is why nothing is polled here.
 con_chrin:
         .a8
         .i16
         phx
         jsl tx_pump
-        jsl rx_poll
         rep #$20
         .a16
         lda KV_INTAIL

@@ -38,8 +38,12 @@ dotnet run --project <nt65-emu>\Norristown.Emulator.Frontend -- --machine hb816 
   host-side typing and paste honor it.
 - The **VPU2** video card renders an 80×30 text matrix from VRAM
   (`$A00000` window). Its registers are write-only; the KERNAL shadows them.
+- **VIA0** (`$008000`, a 6522) carries the keyboard on port A, with a strobe
+  into CA1. A PS/2 keyboard reaches it through a decoder board of its own — an
+  ATmega328P whose firmware lives in
+  [hb816-keyboard](https://github.com/tlgkccampbell/hb816-keyboard).
 - Interrupts are gated by the decoder's `ICR` (`$000001`). The KERNAL unmasks
-  only NMI, which is the vblank level; the machine is otherwise polled.
+  NMI, which is the vblank level, and IRQ, which both input sources share.
 
 ## RAM map
 
@@ -71,8 +75,9 @@ call them with `jsl`. Calling convention: native mode, **A 8-bit, X/Y
 16-bit**, `D = $0000`, `DBR = $00` on entry and exit. X/Y are preserved unless
 a call returns a value in them; A is never preserved; carry reports success
 where a call can fail. Console calls indirect through RAM vectors at
-`$000210`, so drivers can be hooked (this is where a keyboard driver joins the
-input path later — everything above the input ring is source-agnostic).
+`$000210`, so drivers can be hooked. The keyboard driver joins the input path
+below that seam, through `INPUT_PUSH`, so everything above the input ring
+stays source-agnostic.
 
 | Slot | Name | Contract |
 | --- | --- | --- |
@@ -83,13 +88,80 @@ input path later — everything above the input ring is source-agnostic).
 | `$C010` | `CHRIN_WAIT` | blocking read; char in A |
 | `$C014` | `RDLINE` | line editor into `$000900`; Y = length; owns echo |
 | `$C018` | `PUTS` | A = bank, X = address of NUL-terminated string |
-| `$C01C` | `IDLE` | one background tick (transmit pump, receive poll, blink) |
+| `$C01C` | `IDLE` | one background tick (transmit pump, cursor blink) |
 | `$C020` | `CLS` | clear screen, home cursor |
 | `$C024` | `PLOT` | C=0 set cursor (Y=row, X=col); C=1 read it back |
 | `$C028` | `SETATTR` | A = new text attribute; returns previous |
 | `$C02C` | `INPUT_PUSH` | A → console input ring; C=1 accepted |
 | `$C030` | `VPU_SYNC` | rewrite the write-only VPU registers from their shadows |
 | `$C034` | `NMI_EXIT` | tail for `V_NMI_HOOK` interposers |
+| `$C038` | `KBD_TEST` | A = USB HID usage ID; C=1 while that key is held |
+
+## The keyboard
+
+The decoder board does the work. Characters arrive already translated — shift,
+control and caps lock applied — and every key, character keys included, is
+also reported as a press and a release naming it by USB HID usage ID. The
+driver in `src/kbd.s` never sees a scancode and does not decode one.
+
+| Lead byte | Meaning |
+| --- | --- |
+| `$01`–`$7F` | a character; goes into the console input ring through `INPUT_PUSH` |
+| `$80 <id>` | key press; sets that key's bit in `KBDSTATE` |
+| `$81 <id>` | key release; clears it |
+| `$00` | never sent, so an idle port is unambiguous |
+
+Neither lead byte can occur as a character, so the driver never needs a
+timeout to tell one from the other. The authority for the format is
+`protocol.h` in the keyboard repository, and the emulator's
+`Ps2KeyboardDevice` mirrors it; all three move together.
+
+Characters are pushed into the same ring the serial port fills, so `CHRIN` and
+`RDLINE` cannot tell which source typed. **The console ABI did not change.**
+
+### Reading key state
+
+`KBDSTATE` (`$0002E0`, 32 bytes) holds one bit per usage ID, set while the key
+is held — all 256, because the modifiers live at `$E0`–`$E7` and asking
+whether shift is down is the point. A program reads it directly:
+
+```
+    lda KBDSTATE + (KEY_UP >> 3)
+    and #(1 << (KEY_UP & 7))
+    bne moving_up
+```
+
+`KBD_TEST` (`$C038`) does the same for a usage ID in `A`, returning carry set
+while the key is held.
+
+### Why it is interrupt-driven
+
+Polling was tried first and is not enough. The decoder paces bytes about 253
+microseconds apart, port A latches one at a time, and the monitor spends
+longer than that echoing a single character — so typing two keys in a row
+loses a byte, and a lost lead byte turns the usage ID behind it into a stray
+character in the ring. That is not a corner case; it is the second keystroke.
+
+So `ICR_IRQEN` is unmasked at the end of cold start and `irq_service` in
+`kernal.s` owns both input sources. It asks each in turn rather than working
+out which interrupted — each poll is cheap and finds nothing when it was not —
+and each empties its own source before returning, so the level-triggered line
+is always released.
+
+**The serial receiver moved with it.** `rx_poll` used to be called from
+`CHRIN` and `IDLE`; it is now called only from the handler, because a second
+caller would race it over the receive FIFO and the RTS line. Flow control is
+unchanged and still keys off the FIFO's trigger level.
+
+### What is not handled
+
+A release that never arrives leaves its bit set in `KBDSTATE`. The stream is
+designed so this self-heals — a held key repeats under the keyboard's own
+typematic and its press event repeats with it, so a driver can time out a key
+whose repeats stop — but nothing generates those repeats yet: the emulator's
+device reports only what the host injects, and no host injects repeats. A
+timeout without them would clear keys that are genuinely held, so there is
+none, and a dropped release is currently permanent.
 
 ## The monitor
 
@@ -142,7 +214,7 @@ the ABI register state, KERNAL calls for all I/O, `rtl` to come home.
 | `src/inc/hb816.inc` | hardware equates — the board and nothing else |
 | `src/inc/kernal.inc` | RAM map, mailboxes, jump table, ABI — the contract file |
 | `src/vectors.s` | jump table, reset, interrupt stubs, vector tables (bank-0 window) |
-| `src/kernal.s` `src/console.s` `src/uart.s` `src/vpu.s` | the KERNAL proper |
+| `src/kernal.s` `src/console.s` `src/uart.s` `src/kbd.s` `src/vpu.s` | the KERNAL proper |
 | `src/monitor.s` `src/srec.s` | the monitor and the S-record loader |
 | `src/font.s` + `assets/vga16.bin` | the console font (must stay byte-identical to the emulator's copy) |
 | `hb816-kernal.cfg` | ld65 config; memory areas are image offsets, run addresses are CPU addresses |

@@ -17,6 +17,8 @@
 .import cursor_draw
 .import cursor_undraw
 .import init_uart
+.import kbd_init
+.import kbd_poll
 .import int_default
 .import monitor_entry
 .import nmi_exit
@@ -90,18 +92,25 @@ k_cold:
         lda #$03
         sta MB_STEP
 
+        ; The keyboard port. Nothing before this reads it, so a byte the
+        ; decoder board strobed while the machine was still coming up is
+        ; discarded rather than decoded out of context.
+        jsl kbd_init
+
         ; The console is whole - transmit ring, input ring, glass TTY - so
         ; the far end may talk now.
         jsl rts_resume
         lda #$04
         sta MB_STEP
 
-        ; Ready: report it, then unmask the vblank NMI - the one interrupt
-        ; this firmware takes - and hand the machine to the monitor.
+        ; Ready: report it, then unmask both interrupt paths and hand the
+        ; machine to the monitor. IRQ comes last of all, because from here the
+        ; keyboard and the serial port fill the input ring on their own.
         lda #BOOT_READY
         sta MB_BOOTFLAG
-        lda #(ICR_INTEN | ICR_NMIEN)
+        lda #(ICR_INTEN | ICR_NMIEN | ICR_IRQEN)
         icr_store
+        cli
         jml monitor_entry
 
 ; Warm start: a fresh stack, direct page and data bank, the write-only video
@@ -123,13 +132,14 @@ k_warm:
         jsl K_VPU_SYNC
         jml monitor_entry
 
-; One background iteration: pump the transmitter, poll the receiver, and
-; blink the cursor off the vblank tick.
+; One background iteration: pump the transmitter and blink the cursor off the
+; vblank tick. Neither input source is polled here - the interrupt handler
+; fills the ring, and a second caller of rx_poll would race it over the
+; receive FIFO.
 k_idle:
         .a8
         .i16
         jsl tx_pump
-        jsl rx_poll
         rep #$20
         .a16
         lda KV_TICK
@@ -160,6 +170,43 @@ k_idle:
         .a8
         rtl
 
+; The IRQ, which both input sources share: the decoder has one interrupt
+; input and the adapter and both serial ports pull the same net. Neither
+; source is asked whether it was the one that interrupted - each poll is cheap
+; and finds nothing when it was not - and each empties its own source before
+; returning, so a level-triggered line is always released.
+;
+; The interrupted code owns the register widths, the direct page and the data
+; bank, so all three are saved and set to what the routines below expect: A
+; eight-bit, X and Y sixteen-bit, D zero, DBR zero.
+irq_service:
+        rep #$30
+        .a16
+        .i16
+        pha
+        phx
+        phy
+        phd
+        phb
+        lda #$0000
+        tcd
+        sep #$20
+        .a8
+        lda #$00
+        pha
+        plb
+        jsl kbd_poll
+        jsl rx_poll
+        rep #$30
+        .a16
+        .i16
+        plb
+        pld
+        ply
+        plx
+        pla
+        rti
+
 ; Target of every jump-table slot that has no implementation yet: report
 ; failure through the ABI's carry channel.
 k_unimpl:
@@ -187,7 +234,7 @@ vec_defaults:
         .byte $00
         .faraddr nmi_exit       ; V_NMI_HOOK
         .byte $00
-        .faraddr int_default    ; V_IRQ
+        .faraddr irq_service    ; V_IRQ
         .byte $00
         .faraddr brk_default    ; V_BRK
         .byte $00
