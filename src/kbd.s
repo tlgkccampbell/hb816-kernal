@@ -27,6 +27,7 @@
 .export kbd_init
 .export kbd_poll
 .export kbd_test
+.export kbd_expire
 
 .segment "FARCODE"
 
@@ -49,6 +50,8 @@ kbd_init:
         rep #$20
         .a16
         stz KV_KBDLEAD
+        stz KV_KBDHELD
+        stz KV_KBDSEEN
         sep #$20
         .a8
         rtl
@@ -92,6 +95,43 @@ kbd_test:
         ply
         plx
         clc
+        rtl
+
+; Clears the bit of a key whose repeats have stopped, and is called once per
+; frame from the background tick.
+;
+; The keyboard repeats the key it is holding at about eleven a second and its
+; press event repeats with it, so a key whose last announcement is older than
+; KBD_HOLD_TIMEOUT is a key whose release was lost: the keyboard would still be
+; announcing it otherwise.
+;
+; Only the one key the typematic holds can be timed out this way. A key held
+; while a later one is pressed stops repeating on the keyboard itself and never
+; starts again, so its silence says nothing about whether it is still down; its
+; bit stays set until its release arrives. Modifiers and the locks are excluded
+; for the same reason - they do not repeat at all.
+kbd_expire:
+        .a8
+        .i16
+        rep #$20
+        .a16
+        lda KV_KBDHELD
+        beq @done
+        lda a:MB_JIFFY
+        sec
+        sbc KV_KBDSEEN
+        cmp #KBD_HOLD_TIMEOUT
+        bcc @done
+        lda KV_KBDHELD
+        sep #$20
+        .a8
+        jsl kbd_clear
+        rep #$20
+        .a16
+        stz KV_KBDHELD
+@done:
+        sep #$20
+        .a8
         rtl
 
 ; ----------------------------------------------------------------------------
@@ -146,10 +186,11 @@ kbd_byte:
         rtl
 
 ; Sets or clears the bitmap bit for the usage ID in A, according to which lead
-; byte is waiting in KV_KBDLEAD.
+; byte is waiting in KV_KBDLEAD, and moves the typematic's record with it.
 kbd_apply:
         .a8
         .i16
+        pha
         phx
         jsl kbd_locate          ; X = byte index, A = bit mask
         ldy KV_KBDLEAD
@@ -158,8 +199,83 @@ kbd_apply:
         ora KBDSTATE,x
         sta KBDSTATE,x
         plx
-        rtl
+        pla
+        jml kbd_pressed
 @clear:
+        eor #$FF
+        and KBDSTATE,x
+        sta KBDSTATE,x
+        plx
+        pla
+        jml kbd_released
+
+; A press: the key becomes the one the typematic is repeating, and its stamp is
+; taken. A repeat of a key already held arrives as another press and refreshes
+; that stamp, which is exactly what dates the key.
+;
+; A key that does not repeat leaves the record alone rather than claiming it -
+; a modifier held down announces itself once and never again, and a record
+; naming it would be timed out within the quarter second.
+kbd_pressed:
+        .a8
+        .i16
+        jsl kbd_repeats
+        bcc @done
+        rep #$20
+        .a16
+        and #$00FF
+        sta KV_KBDHELD
+        lda a:MB_JIFFY
+        sta KV_KBDSEEN
+        sep #$20
+        .a8
+@done:
+        rtl
+
+; A release gives the typematic up only where the key releasing is the one
+; holding it, so a modifier coming up leaves a repeating key repeating.
+kbd_released:
+        .a8
+        .i16
+        rep #$20
+        .a16
+        and #$00FF
+        cmp KV_KBDHELD
+        bne @done
+        stz KV_KBDHELD
+@done:
+        sep #$20
+        .a8
+        rtl
+
+; C=1 where the usage ID in A is one the keyboard repeats, which is every key
+; but the eight modifiers at $E0-$E7 and the three locks. A is unchanged.
+kbd_repeats:
+        .a8
+        .i16
+        cmp #KBD_CAPSLOCK
+        beq @no
+        cmp #KBD_SCROLLLOCK
+        beq @no
+        cmp #KBD_NUMLOCK
+        beq @no
+        cmp #KBD_LCTRL
+        bcc @yes                ; below the modifiers
+        cmp #KBD_RGUI + 1
+        bcc @no                 ; within them
+@yes:
+        sec
+        rtl
+@no:
+        clc
+        rtl
+
+; Clears the bitmap bit for the usage ID in A, whatever lead byte is waiting.
+kbd_clear:
+        .a8
+        .i16
+        phx
+        jsl kbd_locate          ; X = byte index, A = bit mask
         eor #$FF
         and KBDSTATE,x
         sta KBDSTATE,x

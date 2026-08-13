@@ -17,6 +17,7 @@
 .import cursor_draw
 .import cursor_undraw
 .import init_uart
+.import kbd_expire
 .import kbd_init
 .import kbd_poll
 .import int_default
@@ -132,10 +133,11 @@ k_warm:
         jsl K_VPU_SYNC
         jml monitor_entry
 
-; One background iteration: pump the transmitter and blink the cursor off the
-; vblank tick. Neither input source is polled here - the interrupt handler
-; fills the ring, and a second caller of rx_poll would race it over the
-; receive FIFO.
+; One background iteration: pump the transmitter, time out a key whose repeats
+; have stopped, and blink the cursor - the last two off the vblank tick, so
+; both are counted in frames. Neither input source is polled here - the
+; interrupt handler fills the ring, and a second caller of rx_poll would race
+; it over the receive FIFO.
 k_idle:
         .a8
         .i16
@@ -145,6 +147,11 @@ k_idle:
         lda KV_TICK
         beq @done
         stz KV_TICK
+        sep #$20
+        .a8
+        jsl kbd_expire
+        rep #$20
+        .a16
         lda KV_BLINK
         inc a
         cmp #30

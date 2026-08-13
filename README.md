@@ -153,15 +153,28 @@ is always released.
 caller would race it over the receive FIFO and the RTS line. Flow control is
 unchanged and still keys off the FIFO's trigger level.
 
-### What is not handled
+### A release that never arrives
 
-A release that never arrives leaves its bit set in `KBDSTATE`. The stream is
-designed so this self-heals — a held key repeats under the keyboard's own
-typematic and its press event repeats with it, so a driver can time out a key
-whose repeats stop — but nothing generates those repeats yet: the emulator's
-device reports only what the host injects, and no host injects repeats. A
-timeout without them would clear keys that are genuinely held, so there is
-none, and a dropped release is currently permanent.
+A lost release would leave its bit set in `KBDSTATE` forever, so the stream is
+built to self-heal: a held key repeats under the keyboard's own typematic and
+its press event repeats with it. `kbd_apply` takes each press as a keepalive —
+it records the key in `KV_KBDHELD` and stamps `KV_KBDSEEN` from `MB_JIFFY` —
+and `kbd_expire`, called once a frame from `IDLE`, clears the bit of a key that
+has gone `KBD_HOLD_TIMEOUT` frames unannounced. Fifteen frames is comfortably
+more than one repeat interval and far less than a person notices.
+
+**Only one key is watched at a time, and that is a real limit rather than an
+oversight.** A PS/2 keyboard repeats the key pressed most recently and hands
+the typematic on when a later key goes down; it does not give it back when that
+later key comes up. So a key still held while another was pressed has stopped
+repeating for reasons of its own, and its silence says nothing about whether it
+is still down — timing it out would clear a key the user is holding. Its bit
+stays set until its release arrives. Modifiers and the three locks are excluded
+for the same reason: they never repeat, so they are never dated.
+
+What still sticks, then, is a release lost for a key that was not the last one
+pressed. Closing that needs per-key stamps, and `KVAR` has no room for 256 of
+them.
 
 ## The monitor
 
