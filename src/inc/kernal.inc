@@ -65,6 +65,8 @@ KV_SHMODE       = KVAR + $16    ; shadow of the write-only MODE register, whose
                                 ;   the DISPBASE and MAPBASE shadows, registers
                                 ;   the card no longer has
 KV_SHFONT       = KVAR + $1C    ; shadow of FONTBASE
+KV_KBDLEAD      = KVAR + $1E    ; 16-bit: the key-event lead byte whose usage ID
+                                ;   has not arrived yet, or zero between events
 
 ; ----------------------------------------------------------------------------
 ; Mailboxes, $000300-$00037F: fixed bytes the firmware reports through so the
@@ -89,12 +91,36 @@ MB_LASTERR      = $00031A       ; 16-bit: last error code
 MB_BRKCOUNT     = $00031C       ; 16-bit: BRK/COP re-entries
 MB_GACTIVE      = $00031E       ; 16-bit: nonzero while user code is running
 MB_CURSOR       = $000320       ; 16-bit: cursor blink state
+MB_KBDBYTES     = $000322       ; 16-bit: bytes taken from the keyboard
+MB_KBDCHARS     = $000324       ; 16-bit: keyboard characters pushed to the ring
+MB_KBDKEYS      = $000326       ; 16-bit: key events applied to the bitmap
 
 BOOT_READY      = $A5
 
 ; ----------------------------------------------------------------------------
 ; Rings and buffers.
 ; ----------------------------------------------------------------------------
+
+; ----------------------------------------------------------------------------
+; The key-state bitmap: one bit per USB HID usage ID, set while the key is
+; held. All 256 are covered, because the modifiers live at $E0-$E7 and a
+; program asking whether shift is down is the whole point. Bit n of byte n>>3
+; is usage ID n, so a program tests a key with
+;
+;       lda KBDSTATE + (KEY >> 3)
+;       and #(1 << (KEY & 7))
+;
+; and needs nothing else - no polling protocol, no ring of its own. The
+; address is fixed and public, because programs read it directly.
+;
+; The bitmap follows the keyboard's press and release events, which are
+; reported for every key including those that also produce characters. A
+; release that never arrives leaves its bit set; see README.md for what that
+; costs and what would fix it.
+; ----------------------------------------------------------------------------
+
+KBDSTATE        = $0002E0       ; 32 bytes, filling KVAR through $0002FF
+KBDSTATE_SIZE   = 32
 
 INRING          = $000400       ; console input ring
 INRING_MASK     = $FF
@@ -150,5 +176,6 @@ K_SETATTR       = $00C028       ; A = new attribute; returns the old in A
 K_INPUT_PUSH    = $00C02C       ; A -> input ring; C=1 accepted (the keyboard seam)
 K_VPU_SYNC      = $00C030       ; rewrite the VPU registers from their shadows
 K_NMI_EXIT      = $00C034       ; tail for V_NMI_HOOK interposers
+K_KBD_TEST      = $00C038       ; A = usage ID; C=1 while that key is held
 
 .endif

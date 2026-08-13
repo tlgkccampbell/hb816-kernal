@@ -13,6 +13,7 @@
 .import k_cold
 .import k_idle
 .import k_input_push
+.import kbd_test
 .import k_plot
 .import k_puts
 .import k_setattr
@@ -47,7 +48,7 @@
         jml k_input_push        ; $C02C INPUT_PUSH
         jml k_vpu_sync          ; $C030 VPU_SYNC
         jml nmi_exit            ; $C034 NMI_EXIT
-        jml k_unimpl            ; $C038 reserved
+        jml kbd_test            ; $C038 KBD_TEST
         jml k_unimpl            ; $C03C reserved
         jml k_unimpl            ; $C040 reserved
         jml k_unimpl            ; $C044 reserved

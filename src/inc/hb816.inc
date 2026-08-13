@@ -43,7 +43,53 @@ ICR_NMIEN       = $80           ; NMI path enable
 ; 3,146,875 / (16 * divisor) = baud.
 ; ----------------------------------------------------------------------------
 
-VIA0            = $008000       ; the 6522; unused by the KERNAL so far
+; ----------------------------------------------------------------------------
+; VIA0, sixteen registers at $008000. Port A and CA1 carry the keyboard; port
+; B, CA2 and CB1/CB2 are unattached. A byte arrives on port A and the decoder
+; board announces it with a low pulse into CA1, which sets the CA1 flag and -
+; with latching enabled - captures the byte where the next one cannot disturb
+; it. Reading ORA returns the byte and clears the flag.
+; ----------------------------------------------------------------------------
+
+VIA0            = $008000       ; the 6522
+
+V_ORB           = 0             ; output register B
+V_ORA           = 1             ; output register A; a read clears CA1 and CA2
+V_DDRB          = 2             ; port B data direction
+V_DDRA          = 3             ; port A data direction
+V_T1CL          = 4             ; timer 1 counter low
+V_T1CH          = 5             ; timer 1 counter high
+V_T1LL          = 6             ; timer 1 latch low
+V_T1LH          = 7             ; timer 1 latch high
+V_T2CL          = 8             ; timer 2 counter low
+V_T2CH          = 9             ; timer 2 counter high
+V_SR            = 10            ; shift register
+V_ACR           = 11            ; auxiliary control
+V_PCR           = 12            ; peripheral control
+V_IFR           = 13            ; interrupt flags
+V_IER           = 14            ; interrupt enable
+V_ORANH         = 15            ; port A without the handshake: reads the same
+                                ;   byte and leaves the flags alone
+
+ACR_PALATCH     = $01           ; latch port A on CA1's active edge
+PCR_CA1POS      = $01           ; CA1 active on the rising edge; clear is falling
+IFR_CA1         = $02           ; CA1 transition seen
+IER_SET         = $80           ; in a write to IER, set the named bits
+IER_CA1         = $02           ; CA1 interrupt enable
+
+; ----------------------------------------------------------------------------
+; The keyboard's byte stream, as the decoder board presents it. $01-$7F is a
+; character with shift, control and caps lock already applied; $80 and $81
+; introduce a two-byte key event whose second byte is a USB HID usage ID; $00
+; is never sent. Neither lead byte can occur as a character, so a reader never
+; needs a timeout to tell one from the other.
+;
+; The authority for this is protocol.h in the hb816-keyboard repository, and
+; the emulator's Ps2KeyboardDevice mirrors it; all three move together.
+; ----------------------------------------------------------------------------
+
+KBD_PRESS       = $80           ; key press; the next byte is the usage ID
+KBD_RELEASE     = $81           ; key release; likewise
 
 UART0           = $008010       ; the console port
 UART1           = $008020       ; the auxiliary port
