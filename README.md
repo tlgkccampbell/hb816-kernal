@@ -136,11 +136,12 @@ while the key is held.
 
 ### Why it is interrupt-driven
 
-Polling was tried first and is not enough. The decoder paces bytes about 253
-microseconds apart, port A latches one at a time, and the monitor spends
-longer than that echoing a single character — so typing two keys in a row
-loses a byte, and a lost lead byte turns the usage ID behind it into a stray
-character in the ring. That is not a corner case; it is the second keystroke.
+Polling was tried first and was not enough. The decoder paced bytes about 253
+microseconds apart, port A latched one at a time, and the monitor spent longer
+than that echoing a single character — so typing two keys in a row lost a
+byte, and a lost lead byte turned the usage ID behind it into a stray
+character in the ring. That was not a corner case; it was the second
+keystroke.
 
 So `ICR_IRQEN` is unmasked at the end of cold start and `irq_service` in
 `kernal.s` owns both input sources. It asks each in turn rather than working
@@ -152,6 +153,28 @@ is always released.
 `CHRIN` and `IDLE`; it is now called only from the handler, because a second
 caller would race it over the receive FIFO and the RTS line. Flow control is
 unchanged and still keys off the FIFO's trigger level.
+
+### The CA2 handshake
+
+`kbd_init` puts CA2 into handshake output mode, which is the other half of the
+interface's flow control. Reading `ORA` drives CA2 low, and that is what tells
+the keyboard board its byte was taken; the board's next strobe releases the
+line high again. **The board holds each byte until it sees that**, so a byte
+can no longer be overtaken by the one behind it — the loss that made polling
+unworkable is now impossible rather than merely unlikely.
+
+The fixed 253-microsecond pacing is gone with it. A driver that is reading gets
+the next byte about twenty microseconds after it takes the last, and only a
+host that never answers — one still in reset, or wedged, or running with the
+CA1 interrupt masked — falls back to the board's timeout, which is the old gap.
+
+The interrupt stays, for a reason that has changed: it is no longer about
+keeping up, it is about being prompt. A polled driver would now pace the whole
+interface at whatever rate it got round to looking.
+
+Reading `ORA` at `$00800F` — the mirror without the handshake — deliberately
+does neither: it returns the byte without clearing the flag or acknowledging,
+which is what a monitor wanting to look without consuming needs.
 
 ### A release that never arrives
 

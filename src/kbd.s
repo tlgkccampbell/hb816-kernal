@@ -13,11 +13,16 @@
 ; KBDSTATE, which a program reads directly.
 ;
 ; The transport is the CA1 interrupt. Polling was tried and is not enough: the
-; decoder paces bytes 253 microseconds apart, port A latches one, and the
-; monitor spends longer than that echoing a character - so typing two keys in
-; a row loses a byte, and a lost lead byte turns the usage ID behind it into a
+; decoder paced bytes 253 microseconds apart, port A latched one, and the
+; monitor spent longer than that echoing a character - so typing two keys in a
+; row lost a byte, and a lost lead byte turned the usage ID behind it into a
 ; stray character. kbd_poll is still the only place a byte is fetched; the
 ; interrupt is simply what calls it.
+;
+; The CA2 handshake below has since made that loss impossible rather than
+; merely unlikely, but the interrupt stays: it is what makes the acknowledge
+; prompt, and a polled driver would now pace the whole interface at whatever
+; rate it got round to looking.
 
 .p816
 
@@ -32,9 +37,16 @@
 .segment "FARCODE"
 
 ; Brings the port up: port A all inputs, the byte latched on CA1's falling
-; edge, any edge that arrived before now discarded, and the CA1 interrupt
-; enabled. The caller unmasks the decoder's IRQ path afterwards, so no edge
-; reaches the processor until the whole console is ready for one.
+; edge, CA2 driving the acknowledge, any edge that arrived before now
+; discarded, and the CA1 interrupt enabled. The caller unmasks the decoder's
+; IRQ path afterwards, so no edge reaches the processor until the whole console
+; is ready for one.
+;
+; CA2 in handshake output mode is the other half of the interface's flow
+; control: reading ORA drives it low, which is what tells the keyboard board
+; the byte was taken, and the board's next strobe releases it high again. The
+; board holds each byte until it sees that, so nothing here has to be quick -
+; the byte cannot be overtaken by the one behind it.
 kbd_init:
         .a8
         .i16
@@ -42,7 +54,7 @@ kbd_init:
         sta VIA0 + V_DDRA
         lda #ACR_PALATCH
         sta VIA0 + V_ACR
-        lda #$00                ; CA1 active on the falling edge
+        lda #(PCR_CA1_FALLING | PCR_CA2_HANDSHAKE)
         sta VIA0 + V_PCR
         lda VIA0 + V_ORA        ; discard a stale byte and its flag
         lda #(IER_SET | IER_CA1)
@@ -56,9 +68,9 @@ kbd_init:
         .a8
         rtl
 
-; Takes every byte the port is holding. The decoder paces bytes about 253
-; microseconds apart, so this normally finds one or none; the loop is here
-; because a caller that has been away longer may find the next already
+; Takes every byte the port is holding. Each read of ORA acknowledges its byte
+; and lets the next one go, so this normally finds one or none; the loop is
+; here because a caller that has been away longer may find the next already
 ; latched.
 kbd_poll:
         .a8
