@@ -147,30 +147,43 @@ BAUD_DIVISOR    = 2             ; 3,146,875 / (16 * 2) = 98,340 baud
 ; ----------------------------------------------------------------------------
 
 VPUREG          = $00A000
-VPU_MODE        = VPUREG + $0   ; mode, display base and blink, in one byte
-VPU_CURX        = VPUREG + $1   ; hardware cursor column, 0-79
-VPU_CURY        = VPUREG + $2   ; hardware cursor row; CURY_PARK hides it
+VPU_MODE        = VPUREG + $0   ; mode, display base and cell effect, one byte
+; Offsets $1-$4 are reserved and ignore writes. $1 and $2 were CURX and CURY,
+; before the hardware cursor was evicted to buy back CPLD capacity; a cursor is
+; now software's job, or an expansion card's.
 VPU_FONTBASE    = VPUREG + $5   ; glyph table base, 4 KiB granularity
 VPU_YCMP        = VPUREG + $6   ; raster compare: scan line 4*YCMP, /IRQ for
                                 ;   its duration; YCMP_PARK never matches
 
-; One MODE byte is a whole display description - family, options, blank, and
-; the display base - and every write of it carries all of them. There is no
-; separate base register, so a caller composes the byte it means from the
-; shadow rather than updating a field. In text modes the base is D6:D5, four
-; 128 KiB slots, and D7 enables per-cell blink.
+; One MODE byte is a whole display description - family, geometry, options,
+; cell effect and the display base - and every write of it carries all of them.
+; There is no separate base register, so a caller composes the byte it means
+; from the shadow rather than updating a field. D0 picks the family, and the
+; two readings share only D0 and D4:
+;
+;   bitmap  D7:D5 BASE  D4 FBLANK  D3 PIXDBL  D2:D1 BPP     D0 = 0
+;   text    D7:D6 BASE  D5 HEIGHT  D4 FBLANK  D3:D2 BLINKMODE  D1 DEPTH  D0 = 1
+;
+; A bit's meaning never crosses families: a bitmap write cannot arm a cell
+; effect, and any bitmap write clears BLINKMODE outright.
 MODE_TEXT       = $01           ; 80x30 text cells, classic attributes; never
                                 ;   write $00 - that is bitmap 1 bpp, not "off"
 MODE_BLANK      = $10           ; force blank (composes with the mode bits)
-MODE_BASE_SHIFT = 5             ; display base sits at the top of the byte
-MODE_BLINK      = $80           ; per-cell character blink, text modes only
+MODE_BASE_SHIFT = 6             ; text base, D7:D6, four 128 KiB slots; a
+                                ;   bitmap base is three bits and shifts by 5
 
-; The card powers up as if MODE $01 had been written - text, every base zero -
-; and its hardware cursor powers up visible at cell (0,0). CURY_PARK names a
-; row neither glyph height displays, which is how the cursor is put away. Its
-; raster compare powers up at 0, naming line 0 of every frame; YCMP_PARK names
-; a line past the end of the frame, which is how the compare is put away.
-CURY_PARK       = $3F
+; BLINKMODE, D3:D2 in text modes: one effect for the whole screen, applied to
+; the cells whose attribute flags them - bit 4 in classic cells, bit 7 in
+; palette cells. Any non-zero value costs classic backgrounds their intensity
+; bit, screen-wide.
+MODE_BLINK_OFF    = $00         ; the flag bit is an ordinary colour bit
+MODE_BLINK_HIDE   = $04         ; flagged cells wink out to background, ~0.94 Hz
+MODE_BLINK_SHADE  = $08         ; flagged cells dither to a static 50% checkerboard
+MODE_BLINK_INVERT = $0C         ; flagged cells invert, ~0.94 Hz
+
+; The card powers up as if MODE $01 had been written - text, every base zero.
+; Its raster compare powers up at 0, naming line 0 of every frame; YCMP_PARK
+; names a line past the end of the frame, which is how the compare is put away.
 YCMP_PARK       = $FF
 
 VRAM            = $A00000       ; flat one-megabyte video memory window
@@ -184,7 +197,7 @@ TEXT_SCROLL_SIZE = (TEXT_ROWS - 1) * TEXT_ROW_STRIDE    ; $1D00
 
 FONT_SIZE       = $1000         ; 256 glyphs x 16 rows
 
-MAP_SLOT        = 0             ; text matrix in display slot 0 (MODE D6:D5)
+MAP_SLOT        = 0             ; text matrix in display slot 0 (MODE D7:D6)
 FONT_PAGE       = 2             ; font at VRAM + $2000 (FONTBASE steps 4 KiB)
 
 .endif
