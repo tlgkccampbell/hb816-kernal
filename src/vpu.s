@@ -5,8 +5,8 @@
 ; after anything that might have scribbled on the register window. Video
 ; memory is addressed as base + row * $100 + col * 2 - a text row is a page -
 ; and all of it is reached with long addressing, because the data bank stays
-; zero. The card's own cursor is parked at init and stays parked: the software
-; cursor saves the cell under it and rewrites the attribute with its nibbles
+; zero. The card has no cursor of its own, so the cursor is drawn in software:
+; it saves the cell under it and rewrites the attribute with its nibbles
 ; swapped.
 
 .p816
@@ -270,8 +270,8 @@ tty_cls:
 ; Brings the display up in the one order that never shows garbage: blank
 ; forced first, the palette's entry zero before anything else - the blanking
 ; level itself routes through the palette - then the rest of the identity
-; palette, the font, the font base, a parked cursor and raster compare, a
-; cleared matrix, and only then the unblanked text mode.
+; palette, the font, the font base, a parked raster compare, a cleared matrix,
+; and only then the unblanked text mode.
 video_init:
         .a8
         .i16
@@ -312,14 +312,11 @@ video_init:
         lda #FONT_PAGE
         jsl vpu_set_fontbase
 
-        ; The card's cursor comes up visible at cell (0,0), where it would
-        ; blink under the software cursor. Park it. The raster compare comes up
-        ; at 0 as well, holding /IRQ asserted for line 0 of every frame - the
-        ; KERNAL never unmasks IRQ, but the first program that does would take
-        ; a line it never asked for. Park that too. Cold start has not enabled
-        ; anything in the ICR yet, so the order within this routine is free.
-        lda #CURY_PARK
-        sta VPU_CURY
+        ; The raster compare comes up at 0, holding /IRQ asserted for line 0 of
+        ; every frame - the KERNAL never unmasks IRQ, but the first program that
+        ; does would take a line it never asked for. Park it. Cold start has not
+        ; enabled anything in the ICR yet, so the order within this routine is
+        ; free.
         lda #YCMP_PARK
         sta VPU_YCMP
 
@@ -371,9 +368,8 @@ k_setattr:
 
 ; Replays every write-only register from its shadow. Warm start and the
 ; monitor's return path call this, because user code may have written the
-; register window. The cursor row and the raster compare have no shadows: the
-; KERNAL wants both parked at all times, so the park values are simply written
-; again.
+; register window. The raster compare has no shadow: the KERNAL wants it parked
+; at all times, so the park value is simply written again.
 k_vpu_sync:
         .a8
         .i16
@@ -381,8 +377,6 @@ k_vpu_sync:
         sta VPU_MODE
         lda KV_SHFONT
         sta VPU_FONTBASE
-        lda #CURY_PARK
-        sta VPU_CURY
         lda #YCMP_PARK
         sta VPU_YCMP
         rtl
